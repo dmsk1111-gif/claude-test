@@ -45,7 +45,8 @@ ChatGPT가 스레드 초안을 여러 개 쓰고, Claude가 후킹 점수, 문�
 |---|---|
 | Network access | 허용 도메인에 `api.openai.com`, `api.anthropic.com` 추가 |
 | 환경변수 | `OPENAI_API_KEY` (platform.openai.com에서 발급, 필수) |
-| 환경변수 | `ANTHROPIC_API_KEY` (console.anthropic.com에서 발급, 필수) |
+| 환경변수 | Claude 연결: `ANTHROPIC_VERTEX_PROJECT_ID` (Vertex AI, ADC 로그인) 또는 `ANTHROPIC_API_KEY` |
+| 환경변수 | `CLOUD_ML_REGION` (Vertex AI 리전, 선택, 기본값 `global`) |
 | 환경변수 | `OPENAI_MODEL` (선택, 기본값 `gpt-5`) |
 
 두 API는 ChatGPT Plus, Claude Pro 구독과 별도로 사용량만큼 과금됩니다.
@@ -57,3 +58,23 @@ pip install -r requirements.txt
 python3 ai_pipeline.py check                      # 두 API 연결 점검 (짧은 호출 2회)
 python3 ai_pipeline.py draft "퇴사 후 1년 회고" 5  # 초안 5개 → 검수 → 저장
 ```
+
+### 내 Windows PC에서 Vertex AI(ADC)로 실행
+
+PowerShell에서 순서대로 실행합니다.
+
+```powershell
+winget install Google.CloudSDK Python.Python.3.12 Git.Git   # 설치 후 PowerShell 새로 열기
+gcloud init                                       # 로그인하고 프로젝트 선택
+gcloud auth application-default login             # ADC 로그인 (PC 전역에 저장)
+gcloud services enable aiplatform.googleapis.com  # Vertex AI API 켜기
+setx ANTHROPIC_VERTEX_PROJECT_ID (gcloud config get-value project)
+setx CLOUD_ML_REGION global
+setx OPENAI_API_KEY "sk-..."                      # 설정 후 PowerShell 새로 열기
+git clone -b claude/practical-edison-bw7wi5 https://github.com/dmsk1111-gif/claude-test.git
+cd claude-test
+pip install -r requirements.txt
+python ai_pipeline.py check
+```
+
+Google Cloud 콘솔의 Vertex AI → Model Garden에서 Claude 모델 사용 신청(Enable)을 먼저 해야 합니다.

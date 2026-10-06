@@ -6,8 +6,14 @@ ChatGPT가 스레드 초안을 여러 개 쓰고, Claude가 후킹과 문장을 
 
 필요한 환경변수
   OPENAI_API_KEY      OpenAI API 키 (필수)
-  ANTHROPIC_API_KEY   Anthropic API 키 (필수)
   OPENAI_MODEL        ChatGPT 모델 이름 (선택, 기본값 gpt-5)
+
+  Claude는 둘 중 하나로 연결한다.
+  - Google Cloud Vertex AI (ADC 로그인)
+      ANTHROPIC_VERTEX_PROJECT_ID  Google Cloud 프로젝트 ID
+      CLOUD_ML_REGION              리전 (선택, 기본값 global)
+  - Anthropic API
+      ANTHROPIC_API_KEY            Anthropic API 키
 
 사용법
   python3 ai_pipeline.py check                 두 API 키와 연결을 짧은 호출로 점검
@@ -66,23 +72,40 @@ def chatgpt(instructions, prompt):
     return res.output_text
 
 
+def _claude_create(**params):
+    project = os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID")
+    if project:
+        # ADC: gcloud auth application-default login 으로 저장된 로그인 정보를 쓴다.
+        client = anthropic.AnthropicVertex(
+            project_id=project, region=os.environ.get("CLOUD_ML_REGION", "global"),
+        )
+        return client.messages.create(**params)
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise PipelineError("ANTHROPIC_VERTEX_PROJECT_ID 또는 ANTHROPIC_API_KEY 환경변수가 필요합니다.")
+    # 안전 분류기가 거절하면 서버가 다른 Claude 모델로 자동 재시도한다.
+    return anthropic.Anthropic().beta.messages.create(
+        betas=["server-side-fallback-2026-07-01"], fallbacks="default", **params,
+    )
+
+
 def claude(system, prompt, max_tokens=16000):
-    _require("ANTHROPIC_API_KEY")
     try:
-        # 안전 분류기가 거절하면 서버가 다른 Claude 모델로 자동 재시도한다.
-        res = anthropic.Anthropic().beta.messages.create(
+        res = _claude_create(
             model=CLAUDE_MODEL,
             max_tokens=max_tokens,
             output_config={"effort": "medium"},
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
             system=system,
             messages=[{"role": "user", "content": prompt}],
         )
     except anthropic.APIConnectionError:
-        raise PipelineError("Anthropic 연결 실패 (api.anthropic.com 허용 여부 확인)") from None
+        raise PipelineError("Claude 연결 실패 (네트워크 확인)") from None
     except anthropic.APIStatusError as e:
-        raise PipelineError(f"Anthropic HTTP {e.status_code}: {e.message}") from None
+        raise PipelineError(f"Claude HTTP {e.status_code}: {e.message}") from None
+    except Exception as e:
+        if type(e).__module__.startswith("google.auth"):
+            raise PipelineError("Google 로그인 정보가 없습니다. "
+                                "gcloud auth application-default login 을 먼저 실행하세요.") from None
+        raise
     if res.stop_reason == "refusal":
         raise PipelineError("Claude가 요청을 거절했습니다. 주제를 바꿔 다시 시도하세요.")
     text = "".join(b.text for b in res.content if b.type == "text")
